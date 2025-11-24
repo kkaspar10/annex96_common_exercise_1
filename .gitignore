@@ -185,3 +185,11 @@ examples/*
 render_logs/
 SimulationData/
 results/
+
+# --- My ignored files ---
+src/pre-processing/process_vt_neighborhood.py
+src/simulations/simulate.py
+citylearn/agents/rbc_kathryn.py
+requirements_kathryn.txt
+utilities/
+

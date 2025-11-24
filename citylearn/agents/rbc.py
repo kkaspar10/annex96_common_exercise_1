@@ -2,6 +2,7 @@ from typing import Any, Mapping, List, Union
 from citylearn.agents.base import Agent
 from citylearn.citylearn import CityLearnEnv
 from citylearn.building import Building
+import numpy as np
 
 class RBC(Agent):
     r"""Base rule based controller class.
