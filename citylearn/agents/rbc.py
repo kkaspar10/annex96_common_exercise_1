@@ -21,6 +21,265 @@ class RBC(Agent):
     def __init__(self, env: CityLearnEnv, **kwargs: Any):
         super().__init__(env, **kwargs)
 
+class PITemperatureController(RBC):
+    r"""A PI (Proportional-Integral) controller for temperature regulation.
+
+    This controller uses both proportional and integral control actions to maintain
+    indoor temperature at setpoint. The integral term accumulates temperature error
+    over time to eliminate steady-state offset.
+
+    Parameters
+    ----------
+    env: CityLearnEnv
+        CityLearn environment.
+    kp: float, optional
+        Proportional gain. Higher values increase response to current error.
+        Default is 0.2.
+    ki: float, optional
+        Integral gain. Higher values increase response to accumulated error.
+        Default is 0.05.
+    temp_deadband: float, optional
+        Temperature deadband in degrees. No action is taken if temperature difference is within this range.
+        Default is 0.5 degrees.
+    max_temp_diff: float, optional
+        Maximum expected temperature difference for proportional term scaling.
+        Default is 5.0 degrees.
+    integral_limit: float, optional
+        Anti-windup limit for integral term. Prevents integral from growing too large.
+        Default is 10.0.
+    min_power: float, optional
+        Minimum power output when device is active (0.0-1.0). Default is 0.0.
+    max_power: float, optional
+        Maximum power output (0.0-1.0). Default is 1.0.
+    storage_action_map: Union[Mapping[int, float], Mapping[str, Mapping[int, float]], List[Mapping[str, Mapping[int, float]]]], optional
+        Optional action map for storage devices following HourRBC format. If None, uses BasicRBC storage strategy.
+
+    Other Parameters
+    ----------------
+    **kwargs: Any
+        Other keyword arguments used to initialize super class.
+    """
+
+    def __init__(self, env: CityLearnEnv, kp: float = 0.2, ki: float = 0.005,
+                 temp_deadband: float = 0.5,
+                 integral_limit: float = 10.0,
+                 min_power: float = 0.0, max_power: float = 1.0,
+                 storage_action_map: Union[
+                     List[Mapping[str, Mapping[int, float]]], Mapping[str, Mapping[int, float]], Mapping[
+                         int, float]] = None,
+                 **kwargs: Any):
+        super().__init__(env, **kwargs)
+        self.kp = kp
+        self.ki = ki
+        self.temp_deadband = temp_deadband
+        self.integral_limit = integral_limit
+        self.min_power = min_power
+        self.max_power = max_power
+        self.storage_action_map = storage_action_map
+
+        # Initialize integral error accumulators for each building and device type
+        self.integral_errors = {}
+
+    def reset(self):
+        """Reset the controller state, including integral errors."""
+        super().reset()
+        self.integral_errors = {}
+
+    def _get_integral_key(self, building_idx: int, device_type: str) -> str:
+        """Generate a unique key for storing integral error."""
+        return f"{building_idx}_{device_type}"
+
+    def _calculate_pi_action(self, error: float, integral_key: str) -> float:
+        """Calculate PI control action.
+
+        Parameters
+        ----------
+        error: float
+            Current temperature error (setpoint - actual for heating, actual - setpoint for cooling)
+        integral_key: str
+            Unique key for this device's integral error accumulator
+
+        Returns
+        -------
+        action: float
+            Control action value (0.0-1.0)
+        """
+        if abs(error) <= self.temp_deadband:
+            # Within deadband - reset integral and return zero
+            self.integral_errors[integral_key] = 0.0
+            return 0.0
+
+        # Initialize integral error if not exists
+        if integral_key not in self.integral_errors:
+            self.integral_errors[integral_key] = 0.0
+
+        # Proportional term
+        p_term = self.kp * error
+
+        # Update integral error with anti-windup
+        self.integral_errors[integral_key] += error
+        self.integral_errors[integral_key] = max(min(self.integral_errors[integral_key],
+                                                     self.integral_limit),
+                                                 -self.integral_limit)
+
+        # Integral term
+        i_term = self.ki * self.integral_errors[integral_key]
+
+        # Combined PI output
+        pi_output = p_term + i_term
+
+        # Scale to power range and clamp
+        if pi_output > 0:
+            action_value = self.min_power + pi_output * (self.max_power - self.min_power)
+            action_value = max(min(action_value, self.max_power), self.min_power)
+        else:
+            action_value = 0.0
+
+        return action_value
+
+    def predict(self, observations: List[List[float]], deterministic: bool = None) -> List[List[float]]:
+        """Provide actions for current time step using PI control.
+
+        Parameters
+        ----------
+        observations: List[List[float]]
+            Environment observations
+        deterministic: bool, default: False
+            Whether to return purely exploitative deterministic actions.
+
+        Returns
+        -------
+        actions: List[List[float]]
+            Action values
+        """
+
+        actions = []
+
+        for building_idx, (a, n, o) in enumerate(zip(self.action_names, self.observation_names, observations)):
+            actions_ = []
+
+            # Get current indoor temperature and setpoints if available
+            indoor_temp = None
+            cooling_setpoint = None
+            heating_setpoint = None
+            hour = None
+
+            for i, obs_name in enumerate(n):
+                if obs_name == 'indoor_dry_bulb_temperature':
+                    indoor_temp = o[i]
+                elif obs_name == 'indoor_dry_bulb_temperature_cooling_set_point':
+                    cooling_setpoint = o[i]
+                elif obs_name == 'indoor_dry_bulb_temperature_heating_set_point':
+                    heating_setpoint = o[i]
+                elif obs_name == 'hour':
+                    hour = o[i]
+
+            # Use default setpoints if not available in observations
+            if cooling_setpoint is None:
+                cooling_setpoint = 24.0  # Default cooling setpoint in Celsius
+            if heating_setpoint is None:
+                heating_setpoint = 20.0  # Default heating setpoint in Celsius
+
+            for action_name in a:
+                
+                if 'electrical_storage' in action_name:
+                    if hour is not None:
+                        if 6 <= hour <= 14:
+                            action_value = 0.11
+                        else:
+                            action_value = -0.067
+                    actions_.append(action_value)
+                
+                elif 'storage' in action_name:
+                    # Use storage action map if provided, otherwise use BasicRBC logic
+                    if self.storage_action_map is not None:
+                        if isinstance(self.storage_action_map, dict) and action_name in self.storage_action_map:
+                            if hour is not None:
+                                action_value = self.storage_action_map[action_name].get(hour, 0.0)
+                            else:
+                                action_value = 0.0
+                        else:
+                            action_value = 0.0
+                    else:
+                        # Default BasicRBC storage logic
+                        if hour is not None:
+                            if 9 <= hour <= 21:
+                                action_value = -0.08
+                            elif (1 <= hour <= 8) or (22 <= hour <= 24):
+                                action_value = 0.091
+                            else:
+                                action_value = 0.0
+                        else:
+                            action_value = 0.0
+
+                    actions_.append(action_value)
+
+                elif action_name == 'cooling_device':
+                    if indoor_temp is not None and cooling_setpoint is not None:
+                        error = indoor_temp - cooling_setpoint  # Positive when too hot
+                        integral_key = self._get_integral_key(building_idx, 'cooling')
+                        action_value = self._calculate_pi_action(error, integral_key)
+                    else:
+                        action_value = 0.0
+
+                    actions_.append(action_value)
+
+                elif action_name == 'heating_device':
+                    if indoor_temp is not None and heating_setpoint is not None:
+                        error = heating_setpoint - indoor_temp  # Positive when too cold
+                        integral_key = self._get_integral_key(building_idx, 'heating')
+                        action_value = self._calculate_pi_action(error, integral_key)
+                    else:
+                        action_value = 0.0
+
+                    actions_.append(action_value)
+
+                elif action_name == 'cooling_or_heating_device':
+                    if indoor_temp is not None and cooling_setpoint is not None and heating_setpoint is not None:
+                        cooling_error = indoor_temp - cooling_setpoint
+                        heating_error = heating_setpoint - indoor_temp
+
+                        if cooling_error > self.temp_deadband:
+                            # Need cooling (negative value)
+                            integral_key = self._get_integral_key(building_idx, 'cooling_or_heating_cool')
+                            # Reset heating integral when switching to cooling
+                            heating_key = self._get_integral_key(building_idx, 'cooling_or_heating_heat')
+                            self.integral_errors[heating_key] = 0.0
+
+                            action_value = -self._calculate_pi_action(cooling_error, integral_key)
+
+                        elif heating_error > self.temp_deadband:
+                            # Need heating (positive value)
+                            integral_key = self._get_integral_key(building_idx, 'cooling_or_heating_heat')
+                            # Reset cooling integral when switching to heating
+                            cooling_key = self._get_integral_key(building_idx, 'cooling_or_heating_cool')
+                            self.integral_errors[cooling_key] = 0.0
+
+                            action_value = self._calculate_pi_action(heating_error, integral_key)
+                        else:
+                            # Within deadband
+                            action_value = 0.0
+                            # Reset both integrals
+                            cool_key = self._get_integral_key(building_idx, 'cooling_or_heating_cool')
+                            heat_key = self._get_integral_key(building_idx, 'cooling_or_heating_heat')
+                            self.integral_errors[cool_key] = 0.0
+                            self.integral_errors[heat_key] = 0.0
+                    else:
+                        action_value = 0.0
+
+                    actions_.append(action_value)
+
+                else:
+                    # For any unknown action types, default to 0
+                    actions_.append(0.0)
+
+            actions.append(actions_)
+
+        self.actions = actions
+        self.next_time_step()
+
+        return actions
+
 class HourRBC(RBC):
     r"""A hour-of-use rule-based controller.
 
