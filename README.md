@@ -85,9 +85,10 @@ See /notebooks/ce1_tutorial for a quickstart on how to use citylearn with a stan
 ---
 ## Suggested Timeline
 
-- **Finalize Common Exercise + datasets**: end of 2025  
-- **Kickoff**: early 2026  
-- **Results comparison**: next Annex 96 meeting in Torino  
+- **Finalize Common Exercise + datasets**: December 12, 2025
+- **Kickoff**: January 16, 2025
+- **Submission Deadline**: April 15, 2025
+- **Results comparison**: next Annex 96 meeting in Torino
 
 ---
 
