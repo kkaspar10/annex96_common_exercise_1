@@ -174,21 +174,21 @@ Peak demand is the maximum electricity demand in kilowatts, measured from simula
 Ratio of the daily peak demand to the daily minimum demand and is calculated considering the hourly demand values. Peak to valley ratio gives a measure for the amount of generation that must be brought online to satisfy demand. A value of one indicates a constant load. This metric gives a sense for the magnitude of the dispatchable generation required to meet demand. Record for both baseline and energy flexible operation, resulting in ~30 values for the analysis month.
 
 $$
-\frac{\text{daily peak}}{\text{daily minimum}}
+\text{PVR} = \frac{\text{daily peak}}{\text{daily minimum}}
 $$
 
 ### Load Factor [%]
 Ratio of the average daily demand over the peak daily demand. Load factor indicates how well the generation assets in the system are utilized. Load factors approaching unity indicate a nearly constant use of the assets. The metric is calculated using the hourly demand values consistent with other metrics. Record for both baseline and energy flexible operation, resulting in ~30 values for each analysis month. A higher load factor indicates better utilization of generation assets.
 
 $$
-\frac{\text{average electricity demand}}{\text{maximum daily electricity demand}}
+\text{load factor} = \frac{\text{average electricity demand}}{\text{maximum daily electricity demand}}
 $$
 
 ### System Ramping [kW]
 Measure of the total absolute daily change in portfolio electricity demand from one hourly interval to another.  The metric is calculated using the hourly demand values consistent with other metrics. This metric indicates how much demand changes in total over the course of a day. Calculate the absolute value of the change from one hourly period to another over the course of each day (24 total values/day) and then sum all 24 values for each day to calculate the daily value.  Record for both baseline and energy flexible operation, resulting in ~30 daily values for the testing month.
 
 $$
-\sum_{i=1}^{24} \left| y_i - y_{i-1} \right|
+\text{ramping} = \sum_{i=1}^{24} \left| y_i - y_{i-1} \right|
 $$
 
 
