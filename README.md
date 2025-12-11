@@ -25,6 +25,8 @@ Although flexible demand can support many grid services, the first exercise focu
 
 This allows for consistent comparison across different control strategies and architectures.
 
+![CE1 Overview](./assets/images/ce1_overview.png)
+
 ---
 
 ## Instructions
