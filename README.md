@@ -124,87 +124,74 @@ This becomes the target profile for the entire day.
 ### Portfolio-Level Reference Load Tracking
 
 #### 1. Normalized Mean Bias Error (NMBE) [%]  
-Measures systematic over- or under-consumption:
+Calculated as the mean of the differences between the actual aggregated portfolio load and the reference load profile for each time interval, normalized by the mean reference load and expressed as a percentage. This metric indicates systematic over- or under-consumption relative to the target.
 
-\[
-	ext{NMBE} = rac{	ext{mean}(y - y_	ext{ref})}{	ext{mean}(y_	ext{ref})} 	imes 100\%
-\]
+$$
+\text{NMBE} = \frac{\text{mean}(y - y_{\text{ref}})}{\text{mean}(y_{\text{ref}})} \times 100\%
+$$
+
 
 #### 2. Coefficient of Variation of RMSE (CV-RMSE) [%]  
-Captures total tracking error (bias + variance):
+Calculated as the root mean square error between actual aggregated portfolio load and reference load profile, normalized by the mean reference load. This metric captures the overall tracking accuracy including both bias and variance.
 
-\[
-	ext{CV-RMSE} = rac{\sqrt{	ext{mean}((y - y_	ext{ref})^2)}}{	ext{mean}(y_	ext{ref})} 	imes 100\%
-\]
-
+$$
+\text{CV-RMSE} =
+\frac{\sqrt{\text{mean}((y - y_{\text{ref}})^2)}}{\text{mean}(y_{\text{ref}})} \times 100\%
+$$
 
 ### Thermal Comfort
 
 #### Temperature Exceedance Hours (hours)  
-Hours where indoor temperature is outside comfort bounds:
+The cumulative hours during which indoor air temperature falls outside the comfort bounds:
 
 - **Heating season:** 20–24 °C  
 - **Cooling season:** 22–26 °C  
 
 Report:  
 - total exceedance hours per building  
-- percent of hours  
-- distribution across portfolio  
+- percent of hours exceeded across portfolio
 
 
 ## Secondary Metrics
 
 ### Fairness
-Assesses how evenly flexibility actions are distributed across buildings.  
-A few buildings providing most flexibility is undesirable for:
-
-- reliability  
-- device longevity  
-- occupant comfort  
+This metric documents the diversity in individual response when tracking the portfolio signal, i.e. the activation of individual flexible assets per consumer, and whether this is proportional on a portfolio level. A few individual consumers providing most of the flexibility in the portfolio repeatedly is undesirable in terms of flexible response reliability, device longevity as well as the potential impact on occupant comfort.
 
 
 ### Cost Changes [%]
-Relative savings between baseline/RBC and flexibility-enabled operation.
-
+Cost changes is the relative savings between the baseline PI controller without energy flexibility activation and the corresponding energy flexible operation given the control strategy utilized.
 
 ### Carbon Emissions [kg CO₂e]
-Compute using hourly grid carbon intensity.
-
+Total operational carbon emissions based on provided hourly grid carbon content. 
 
 ### Change in Site Total Energy Consumption [%]
-Difference in total site energy between flexible and baseline scenarios.  
-Indicates energy efficiency impacts of flexible operation.
+Total site energy consumption percentage difference between the baseline scenario or simple RBC controller without energy flexibility activation and the scenario with energy flexibility activation gives an indication of the “energy efficiency” of energy flexibility. This metric serves to show how flexibility activation changes total portfolio site energy consumption.
 
 ### Peak Demand [kW]
-Maximum 15-minute demand over the simulation.
-
-Report:  
-- peak value  
-- timestamp  
-- baseline vs flexible scenario results
+Peak demand is the maximum electricity demand in kilowatts, measured from simulation time series results. Peak demand determines the maximum generation requirements in serving the building portfolio. To better characterize the portfolio demand, base case peak demand and energy flexible peak demand should be reported separately. In addition to the values of the peak demand, the time of its occurrence should be recorded. For example, baseline: Peak demand of 100 kW occurring at 8:00 AM on Feb 2; flexibility-aware portfolio: peak demand of 120 kW occurring at 5:45 AM on Feb 15.
 
 ### Peak-to-Valley Ratio [%]
-\[
-rac{	ext{daily peak}}{	ext{daily minimum}}
-\]
+Ratio of the daily peak demand to the daily minimum demand and is calculated considering the hourly demand values. Peak to valley ratio gives a measure for the amount of generation that must be brought online to satisfy demand. A value of one indicates a constant load. This metric gives a sense for the magnitude of the dispatchable generation required to meet demand. Record for both baseline and energy flexible operation, resulting in ~30 values for the analysis month.
 
-Indicates required generation dispatch range.
+$$
+\frac{\text{daily peak}}{\text{daily minimum}}
+$$
 
 ### Load Factor [%]
-\[
-rac{	ext{average demand}}{	ext{peak demand}}
-\]
+Ratio of the average daily demand over the peak daily demand. Load factor indicates how well the generation assets in the system are utilized. Load factors approaching unity indicate a nearly constant use of the assets. The metric is calculated using the hourly demand values consistent with other metrics. Record for both baseline and energy flexible operation, resulting in ~30 values for each analysis month. A higher load factor indicates better utilization of generation assets.
 
-A higher load factor indicates better utilization of generation assets.
+$$
+\frac{\text{average electricity demand}}{\text{maximum daily electricity demand}}
+$$
 
 ### System Ramping [kW]
-Sum of absolute changes in demand between consecutive 15-minute intervals over a day:
+Measure of the total absolute daily change in portfolio electricity demand from one hourly interval to another.  The metric is calculated using the hourly demand values consistent with other metrics. This metric indicates how much demand changes in total over the course of a day. Calculate the absolute value of the change from one hourly period to another over the course of each day (24 total values/day) and then sum all 24 values for each day to calculate the daily value.  Record for both baseline and energy flexible operation, resulting in ~30 daily values for the testing month.
 
-\[
-\sum_{i=1}^{96} |y_i - y_{i-1}|
-\]
+$$
+\sum_{i=1}^{24} \left| y_i - y_{i-1} \right|
+$$
 
-Report baseline vs flexible scenario over ~30 days.
+
 
 ----------------------------------------------------------------
 
