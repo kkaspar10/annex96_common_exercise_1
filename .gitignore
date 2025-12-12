@@ -195,7 +195,7 @@ utilities/citylearn_loader.py
 utilities/common_imports.py
 citylearn/building_edited.py
 data/extra_schemas/
-
+outputs/
 
 ## Ignore workflows  ---
 .github/workflows/
