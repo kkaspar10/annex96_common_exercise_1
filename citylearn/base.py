@@ -1,285 +1,272 @@
-import logging
-from typing import Any, List, Mapping
-from gymnasium import spaces
+import random
+from typing import Any, List, Mapping, Tuple, Union
+import uuid
 import numpy as np
-from citylearn.base import Environment
-from citylearn.citylearn import CityLearnEnv
 
-LOGGER = logging.getLogger()
+class EpisodeTracker:
+    """Class for keeping track of current episode time steps for reading observations from data files.
 
-class Agent(Environment):
-    r"""Base agent class.
+    An EpisodeTracker object is shared amongst the environment, buildings in environment and all descendant 
+    building devices. The object however, should be updated at the environment level only so that its changes 
+    propagate to all other evironment decscendants. `simulation_start_time_step` and `simulation_end_time_step`
+    are useful to separate training data from test data in the same data file. There may be one or more episodes betweeen 
+    `simulation_start_time_step` and `simulation_end_time_step` and their values should be defined in `schema` 
+    or parsed to :py:class:`citylearn.citylearn.CityLearnEnv.__init__`. Both `simulation_start_time_step` and 
+    `simulation_end_time_step` are used to select time series for building device and storage sizing as well as 
+    action and observation space estimation in :py:class:`citylearn.buiLding.Building`.
 
     Parameters
     ----------
-    env : CityLearnEnv
-        CityLearn environment.
-
-    Other Parameters
-    ----------------
-    **kwargs : dict
-        Other keyword arguments used to initialize super class.
+    simulation_start_time_step: int
+        Time step to start reading from data files. 
+    simulation_end_time_step: int
+        Time step to end reading from data files.
     """
     
-    def __init__(self, env: CityLearnEnv, **kwargs: Any):
-        self.env = env
-        self.observation_names = self.env.observation_names
-        self.action_names = self.env.unwrapped.action_names
-        self.observation_space = self.env.observation_space
-        self.action_space = self.env.action_space
-        self.episode_time_steps = self.env.unwrapped.time_steps
-        self.building_metadata = self.env.unwrapped.get_metadata()['buildings']
-        super().__init__(
-            seconds_per_time_step=self.env.unwrapped.seconds_per_time_step,
-            random_seed=self.env.unwrapped.random_seed,
-            episode_tracker=self.env.unwrapped.episode_tracker,
-            time_step_ratio=self.env.unwrapped.time_step_ratio
+    def __init__(self, simulation_start_time_step: int, simulation_end_time_step: int):
+        self.__episode = None
+        self.__episode_start_time_step = None
+        self.__episode_end_time_step = None
+        self.__simulation_start_time_step = simulation_start_time_step
+        self.__simulation_end_time_step = simulation_end_time_step
+        self.reset_episode_index()
+
+    @property
+    def episode(self):
+        """Current episode index"""
+
+        return self.__episode
+    
+    @property
+    def episode_time_steps(self):
+        """Number of time steps in current episode split."""
+
+        return (self.episode_end_time_step - self.episode_start_time_step) + 1
+    
+    @property
+    def simulation_time_steps(self):
+        """Number of time steps between `simulation_start_time_step` and `simulation_end_time_step`."""
+
+        return (self.__simulation_end_time_step - self.__simulation_start_time_step) + 1
+    
+    @property
+    def simulation_start_time_step(self):
+        """Time step to start reading from data files."""
+
+        return self.__simulation_start_time_step
+    
+    @property
+    def simulation_end_time_step(self):
+        """Time step to end reading from data files."""
+
+        return self.__simulation_end_time_step
+    
+    @property
+    def episode_start_time_step(self):
+        """Start time step in current episode split."""
+
+        return self.__episode_start_time_step
+    
+    @property
+    def episode_end_time_step(self):
+        """End time step in current episode split."""
+
+        return self.__episode_end_time_step
+
+    def next_episode(self, episode_time_steps: Union[int, List[Tuple[int, int]]], rolling_episode_split: bool, random_episode_split: bool, random_seed: int):
+        """Advance to next episode and set `episode_start_time_step` and `episode_end_time_step` for reading data files.
+        
+        Parameters
+        ----------
+        episode_time_steps: Union[int, List[Tuple[int, int]]], optional
+            If type is `int`, it is the number of time steps in an episode. If type is `List[Tuple[int, int]]]` is provided, it is a list of 
+            episode start and end time steps between `simulation_start_time_step` and `simulation_end_time_step`. Defaults to (`simulation_end_time_step` 
+        - `simulation_start_time_step`) + 1. Will ignore `rolling_episode_split` if `episode_splits` is of type `List[Tuple[int, int]]]`.
+        rolling_episode_split: bool, default: False
+            True if episode sequences are split such that each time step is a candidate for `episode_start_time_step` otherwise, False to split episodes 
+            in steps of `episode_time_steps`.
+        random_episode_split: bool, default: False
+            True if episode splits are to be selected at random during training otherwise, False to select sequentially.
+        """
+
+        self.__episode += 1
+        self.__next_episode_time_steps(
+            episode_time_steps,
+            rolling_episode_split,
+            random_episode_split,
+            random_seed,
         )
-        self.reset()
+        
+    def __next_episode_time_steps(self, episode_time_steps: Union[int, List[Tuple[int, int]]], rolling_episode_split: bool, random_episode_split: bool, random_seed: int):
+        """Sets `episode_start_time_step` and `episode_end_time_step` for reading data files."""
+
+        splits = None
+
+        if isinstance(episode_time_steps, List):
+            splits = episode_time_steps
+
+        else:
+            earliest_start_time_step = self.__simulation_start_time_step 
+            latest_start_time_step = (self.__simulation_end_time_step + 1) - episode_time_steps
+            
+            if rolling_episode_split:
+                start_time_steps = range(earliest_start_time_step, latest_start_time_step + 1)
+            else:
+                start_time_steps = range(earliest_start_time_step, latest_start_time_step + 1, episode_time_steps)
+
+            end_time_steps = np.array(start_time_steps, dtype=int) + episode_time_steps - 1
+            splits = np.array([start_time_steps, end_time_steps], dtype=int).T
+            splits = splits.tolist()
+
+        if random_episode_split:
+            seed = int(random_seed*(self.episode + 1))
+            nprs = np.random.RandomState(seed)
+            ix = nprs.choice(len(splits) - 1)
+
+        else:
+            ix = self.episode%len(splits)
+
+        self.__episode_start_time_step, self.__episode_end_time_step = splits[ix]
+
+    def reset_episode_index(self):
+        """Resets episode index to -1 before any simulation."""
+
+        self.__episode = -1
+
+class Environment:
+    """Base class for all `citylearn` classes that have a spatio-temporal dimension.
+
+    Parameters
+    ----------
+    seconds_per_time_step: float, default: 3600.0
+        Number of seconds in 1 `time_step` and must be set to >= 1.
+    random_seed : int, optional
+        Pseudorandom number generator seed for repeatable results.
+    simulation_start_time_step: int, optional
+        Time step to start reading from data files. Should be set at the :py:class:`citylearn.citylearn.CityLearnEnv` level so that it propagates to other descendant objects.
+    simulation_end_time_step: int, optional
+        Time step to end reading from data files. Should be set at the :py:class:`citylearn.citylearn.CityLearnEnv` level so that it propagates to other descendant objects.
+    episode_tracker: EpisodeTracker, optional
+        :py:class:`citylearn.base.EpisodeTracker` object used to keep track of current episode time steps for reading observations from data files.
+    """
+
+    DEFAULT_SECONDS_PER_TIME_STEP = 3600.0
+    DEFAULT_RANDOM_SEED_RANGE = (0, 100_000_000)
+    
+    def __init__(self, seconds_per_time_step: float = None, random_seed: int = None, episode_tracker: EpisodeTracker = None, time_step_ratio: int = None):
+        self.seconds_per_time_step = seconds_per_time_step
+        self.__uid = uuid.uuid4().hex
+        self.random_seed = random_seed
+        self.__time_step = None
+        self.episode_tracker = episode_tracker
+        self.time_step_ratio = time_step_ratio
 
     @property
-    def env(self) -> CityLearnEnv:
-        """CityLearn environment."""
+    def uid(self) -> str:
+        r"""Unique environment ID."""
 
-        return self.__env
-
-    @property
-    def observation_names(self) -> List[List[str]]:
-        """Names of active observations that can be used to map observation values."""
-
-        return self.__observation_names
+        return self.__uid
     
     @property
-    def action_names(self) -> List[List[str]]:
-        """Names of active actions that can be used to map action values."""
+    def random_seed(self) -> int:
+        """Pseudorandom number generator seed for repeatable results."""
 
-        return self.__action_names
-
-    @property
-    def observation_space(self) -> List[spaces.Box]:
-        """Format of valid observations."""
-
-        return self.__observation_space
-
-    @property
-    def action_space(self) -> List[spaces.Box]:
-        """Format of valid actions."""
-
-        return self.__action_space
+        return self.__random_seed
     
     @property
-    def episode_time_steps(self) -> int:
-        return self.__episode_time_steps
+    def episode_tracker(self) -> EpisodeTracker:
+        """:py:class:`citylearn.base.EpisodeTracker` object used to keep track of 
+        current episode time steps for reading observations from data files."""
 
-    @property
-    def building_metadata(self) -> List[Mapping[str, Any]]:
-        """Building(s) metadata."""
-
-        return self.__building_metadata
-
-    @property
-    def action_dimension(self) -> List[int]:
-        """Number of returned actions."""
-
-        return [s.shape[0] for s in self.action_space]
-
-    @property
-    def actions(self) -> List[List[List[Any]]]:
-        """Action history/time series."""
-
-        return self.__actions
+        return self.__episode_tracker
     
-    @env.setter
-    def env(self, env: CityLearnEnv):
-        self.__env = env
+    @property
+    def time_step_ratio(self) -> int:
+        """:py:class:`citylearn.base.EpisodeTracker` object used to keep track of 
+        current episode time steps for reading observations from data files."""
 
-    @observation_names.setter
-    def observation_names(self, observation_names: List[List[str]]):
-        self.__observation_names = observation_names
+        return self.__time_step_ratio
 
-    @action_names.setter
-    def action_names(self, action_names: List[List[str]]):
-        self.__action_names = action_names
+    @property
+    def time_step(self) -> int:
+        r"""Current environment time step."""
 
-    @observation_space.setter
-    def observation_space(self, observation_space: List[spaces.Box]):
-        self.__observation_space = observation_space
+        return self.__time_step
 
-    @action_space.setter
-    def action_space(self, action_space: List[spaces.Box]):
-        self.__action_space = action_space
+    @property
+    def seconds_per_time_step(self) -> float:
+        r"""Number of seconds in 1 time step."""
 
-    @episode_time_steps.setter
-    def episode_time_steps(self, episode_time_steps: int):
-        """Number of time steps in one episode."""
-
-        self.__episode_time_steps = episode_time_steps
-
-    @building_metadata.setter
-    def building_metadata(self, building_metadata: List[Mapping[str, Any]]):
-        self.__building_metadata = building_metadata
-
-    @actions.setter
-    def actions(self, actions: List[List[Any]]):
-        for i in range(len(self.action_space)):
-            self.__actions[i][self.time_step] = actions[i]
-
-    def learn(self, episodes: int = None, deterministic: bool = None, deterministic_finish: bool = None, logging_level: int = None):
-        """Train agent.
-
-        Parameters
-        ----------
-        episodes: int, default: 1
-            Number of training episode >= 1.
-        deterministic: bool, default: False
-            Indicator to take deterministic actions i.e. strictly exploit the learned policy.
-        deterministic_finish: bool, default: False
-            Indicator to take deterministic actions in the final episode.
-        logging_level: int, default: 30
-            Logging level where increasing the number silences lower level information.
-        """
-        
-        episodes = 1 if episodes is None else episodes
-        deterministic_finish = False if deterministic_finish is None else deterministic_finish
-        deterministic = False if deterministic is None else deterministic
-        self.__set_logger(logging_level)
-
-        for episode in range(episodes):
-            deterministic = deterministic or (deterministic_finish and episode >= episodes - 1)
-            observations, _ = self.env.reset()
-            self.episode_time_steps = self.episode_tracker.episode_time_steps
-            terminated = False
-            time_step = 0
-            rewards_list = []
-
-            while not terminated:
-                actions = self.predict(observations, deterministic=deterministic)
-
-                # apply actions to citylearn_env
-                next_observations, rewards, terminated, truncated, _ = self.env.step(actions)
-                rewards_list.append(rewards)
-
-                # update
-                if not deterministic:
-                    self.update(observations, actions, rewards, next_observations, terminated=terminated, truncated=truncated)
-                else:
-                    pass
-
-                observations = [o for o in next_observations]
-
-                logging.debug(
-                    f'Time step: {time_step + 1}/{self.episode_time_steps},'\
-                        f' Episode: {episode + 1}/{episodes},'\
-                            f' Actions: {actions},'\
-                                f' Rewards: {rewards}'
-                )
-
-                time_step += 1
-
-            rewards = np.array(rewards_list, dtype='float')
-            rewards_summary = {
-                'min': rewards.min(axis=0),
-                'max': rewards.max(axis=0),
-                'sum': rewards.sum(axis=0),
-                'mean': rewards.mean(axis=0)
-            }
-            logging.info(f'Completed episode: {episode + 1}/{episodes}, Reward: {rewards_summary}')
-
-    def predict(self, observations: List[List[float]], deterministic: bool = None) -> List[List[float]]:
-        """Provide actions for current time step.
-
-        Return randomly sampled actions from `action_space`.
-        
-        Parameters
-        ----------
-        observations: List[List[float]]
-            Environment observations
-        deterministic: bool, default: False
-            Wether to return purely exploitatative deterministic actions.
-
-        Returns
-        -------
-        actions: List[List[float]]
-            Action values
-        """
-        
-        actions = [list(s.sample()) for s in self.action_space]
-        self.actions = actions
-        self.next_time_step()
-        return actions
+        return self.__seconds_per_time_step
     
-    def __set_logger(self, logging_level: int = None):
-        """Set logging level."""
+    @property
+    def numpy_random_state(self) -> np.random.RandomState:
+        """Nupy random state object."""
 
-        logging_level = 30 if logging_level is None else logging_level
-        assert logging_level >= 0, 'logging_level must be >= 0'
-        LOGGER.setLevel(logging_level)
+        return np.random.RandomState(self.random_seed)
+    
+    @random_seed.setter
+    def random_seed(self, random_seed: int):
+        random_seed = random.randint(*self.DEFAULT_RANDOM_SEED_RANGE) if random_seed is None else random_seed
+        self.__random_seed = random_seed
 
-    def update(self, *args, **kwargs):
-        """Update replay buffer and networks.
-        
-        Notes
-        -----
-        This implementation does nothing but is kept to keep the API for all agents similar during simulation.
-        """
+    @seconds_per_time_step.setter
+    def seconds_per_time_step(self, seconds_per_time_step: float):
+        if seconds_per_time_step is None:
+            self.seconds_per_time_step = self.DEFAULT_SECONDS_PER_TIME_STEP
+        else:
+            assert seconds_per_time_step >= 1, 'seconds_per_time_step >= 1'
+            self.__seconds_per_time_step = seconds_per_time_step
 
-        pass
+    @episode_tracker.setter
+    def episode_tracker(self, episode_tracker: EpisodeTracker):
+        self.__episode_tracker = episode_tracker
+    
+    @time_step_ratio.setter
+    def time_step_ratio(self, time_step_ratio: int):
+        self.__time_step_ratio = time_step_ratio
+
+    @time_step.setter
+    def time_step(self, time_step: int):
+        self.__time_step = time_step    
+
+    def get_metadata(self) -> Mapping[str, Any]:
+        """Returns general static information."""
+
+        return {
+            'uid': self.uid,
+            'random_seed': self.random_seed,
+            'simulation_time_steps': self.episode_tracker.simulation_time_steps,
+            'seconds_per_time_step': self.seconds_per_time_step,
+            'time_step_ratio': self.time_step_ratio,
+        }
 
     def next_time_step(self):
-        super().next_time_step()
+        r"""Advance to next `time_step` value.
 
-        for i in range(len(self.action_space)):
-            self.__actions[i].append([])
+        Notes
+        -----
+        Override in subclass for custom implementation when advancing to next `time_step`.
+        """
+
+        self.__time_step += 1
 
     def reset(self):
-        super().reset()
-        self.__actions = [[[]] for _ in self.action_space]
+        r"""Reset environment to initial state.
 
-class BaselineAgent(Agent):
-    r"""Agent class for business-as-usual simulation where the storage systems and heat pumps are not controlled.
+        Calls `reset_time_step`.
 
-    This agent will provide results for when there is no storage for load shifting and no heat pump partial load. 
-    The storage actions prescribed will be 0.0 and the heat pump will have no action, i.e. `None`, causing it to 
-    deliver the ideal load in the building time series files. 
-    
-    To ensure that the environment does not expect non-zero and non-null actions, the buildings in the parsed `env` 
-    will be set to have no active actions. This means that you must initialize a new `env` if you want to simulate
-    with a new agent type. 
-    
-    This agent class is best used to establish a baseline simulation that can then be compared 
-    to RBC, RLC, or MPC control algorithms.
+        Notes
+        -----
+        Override in subclass for custom implementation when reseting environment.
+        """
 
-    Parameters
-    ----------
-    env : CityLearnEnv
-        CityLearn environment.
+        self.reset_time_step()
 
-    Other Parameters
-    ----------------
-    **kwargs : dict
-        Other keyword arguments used to initialize super class.
-    """
+    def reset_time_step(self):
+        r"""Reset `time_step` to initial state.
 
-    def __init__(self, env: CityLearnEnv, **kwargs: Any):
-        super().__init__(env, **kwargs)
+        Sets `time_step` to 0.
+        """
 
-    @Agent.env.setter
-    def env(self, env: CityLearnEnv):
-        Agent.env.fset(self, self.__deactivate_actions(env))
-
-    def __deactivate_actions(self, env: CityLearnEnv) -> CityLearnEnv:
-        for b in env.unwrapped.buildings:
-            for a in b.action_metadata:
-                b.action_metadata[a] = False
-
-            b.action_space = b.estimate_action_space()
-            b.observation_space = b.estimate_observation_space()
-
-        return env
-
-    def predict(self, observations: List[List[float]], deterministic: bool = None) -> List[List[float]]:
-        actions = [[] for _ in self.action_names]
-        self.actions = actions
-        self.next_time_step()
-        
-        return actions
+        self.__time_step = 0
