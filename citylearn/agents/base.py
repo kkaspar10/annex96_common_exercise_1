@@ -4,7 +4,7 @@ from gymnasium import spaces
 import numpy as np
 from citylearn.base import Environment
 from citylearn.citylearn import CityLearnEnv
-import wandb
+
 LOGGER = logging.getLogger()
 
 class Agent(Environment):
